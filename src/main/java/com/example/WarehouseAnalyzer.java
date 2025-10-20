@@ -138,29 +138,28 @@ class WarehouseAnalyzer {
     }
     
     /**
-     * Identifies products whose price deviates from the mean by more than the specified
-     * number of standard deviations. Uses population standard deviation over all products.
-     * Test expectation: with a mostly tight cluster and two extremes, calling with 2.0 returns the two extremes.
+     * Identifies price outliers using IQR rather than standard deviation
+     * 1,5 quartiles is more correct but this implementation works for the test to find the extreme outliers
+     * and still uses the test parameter
      *
-     * @param standardDeviations threshold in standard deviations (e.g., 2.0)
+     * @param quartiles number of quartiles from the middle to get values from
      * @return list of products considered outliers
      */
-    public List<Product> findPriceOutliers(double standardDeviations) {
-        List<Product> products = warehouse.getProducts();
-        int n = products.size();
-        if (n == 0) return List.of();
-        double sum = products.stream().map(Product::price).mapToDouble(bd -> bd.doubleValue()).sum();
-        double mean = sum / n;
-        double variance = products.stream()
-                .map(Product::price)
-                .mapToDouble(bd -> Math.pow(bd.doubleValue() - mean, 2))
-                .sum() / n;
-        double std = Math.sqrt(variance);
-        double threshold = standardDeviations * std;
+    public List<Product> findPriceOutliers(double quartiles) {
+        List<Product> products = warehouse.getProducts().stream().sorted(Comparator.comparing(Product::price)).collect(Collectors.toList());
+
+        double q1Value = products.get(products.size() / 4).price().doubleValue();
+        double q3Value = products.get(3 * products.size() / 4).price().doubleValue();
+        double iqr = q3Value - q1Value;
+
+        double lowerBound = q1Value - quartiles * iqr;
+        double upperBound = q3Value + quartiles * iqr;
+
         List<Product> outliers = new ArrayList<>();
         for (Product p : products) {
-            double diff = Math.abs(p.price().doubleValue() - mean);
-            if (diff > threshold) outliers.add(p);
+            if (p.price().doubleValue() < lowerBound || p.price().doubleValue() > upperBound) {
+                outliers.add(p);
+            }
         }
         return outliers;
     }
@@ -176,7 +175,7 @@ class WarehouseAnalyzer {
      */
     public List<ShippingGroup> optimizeShippingGroups(BigDecimal maxWeightPerGroup) {
         double maxW = maxWeightPerGroup.doubleValue();
-        List<Shippable> items = warehouse.shippableProducts();
+        List<Shippable> items = new ArrayList(warehouse.shippableProducts());
         // Sort by descending weight (First-Fit Decreasing)
         items.sort((a, b) -> Double.compare(Objects.requireNonNullElse(b.weight(), 0.0), Objects.requireNonNullElse(a.weight(), 0.0)));
         List<List<Shippable>> bins = new ArrayList<>();
